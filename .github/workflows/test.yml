@@ -1,0 +1,40 @@
+name: SQLite WAL restore acceptance
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    name: Python ${{ matrix.python }} / Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.12.14', '3.13.5']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Record runtime and exact source
+        run: |
+          python -c 'import sys, sqlite3; print(sys.version); print(sqlite3.sqlite_version)'
+          git rev-parse HEAD
+      - run: python -B -m unittest discover -s tests -v
+      - name: Verify complete experiment and CLI controls
+        shell: bash
+        run: |
+          python -B lab.py --json > "$RUNNER_TEMP/experiment.json"
+          python -B lab.py --method backup-api --json > "$RUNNER_TEMP/positive.json"
+          set +e
+          python -B lab.py --method main-file-copy --json > "$RUNNER_TEMP/negative.json"
+          status=$?
+          set -e
+          test "$status" -eq 1
+          python -c 'import json,sys; assert json.load(open(sys.argv[1]))["passed"]; assert json.load(open(sys.argv[2]))["passed"]; assert not json.load(open(sys.argv[3]))["passed"]' "$RUNNER_TEMP/experiment.json" "$RUNNER_TEMP/positive.json" "$RUNNER_TEMP/negative.json"
+      - run: git diff --exit-code
